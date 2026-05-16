@@ -1,0 +1,14 @@
+{
+  "output_dir": "D:\\personal_resources\\CV_research\\boxmot\\output\\bee_foreground_random100_review_v2_20260516",
+  "checkpoint": "D:\\personal_resources\\CV_research\\boxmot\\output\\bee_foreground_models\\manual_v2_combined264_unetpp_resnet18_gpu_b4_nocudnn\\best_model.pt",
+  "input_root": "D:\\personal_resources\\CV_research\\AutoDL\\train_20260501",
+  "sample_count": 100,
+  "device": "cuda",
+  "seed": 20260516,
+  "contact_sheets": [
+    "D:\\personal_resources\\CV_research\\boxmot\\output\\bee_foreground_random100_review_v2_20260516\\random100_contact_sheet_page1.jpg",
+    "D:\\personal_resources\\CV_research\\boxmot\\output\\bee_foreground_random100_review_v2_20260516\\random100_contact_sheet_page2.jpg",
+    "D:\\personal_resources\\CV_research\\boxmot\\output\\bee_foreground_random100_review_v2_20260516\\random100_contact_sheet_page3.jpg",
+    "D:\\personal_resources\\CV_research\\boxmot\\output\\bee_foreground_random100_review_v2_20260516\\random100_contact_sheet_page4.jpg"
+  ]
+}

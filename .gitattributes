@@ -1,0 +1,6 @@
+* text=auto
+*.pt binary
+*.jpg binary
+*.jpeg binary
+*.png binary
+*.zip binary

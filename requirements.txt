@@ -1,0 +1,6 @@
+numpy==1.24.4
+opencv-python==4.13.0
+Pillow==10.4.0
+segmentation-models-pytorch==0.3.3
+torch==1.11.0
+torchvision==0.12.0
