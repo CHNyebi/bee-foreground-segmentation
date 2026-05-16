@@ -66,6 +66,43 @@ def resize_pair(image: np.ndarray, mask: np.ndarray, image_size: int):
     return image, mask
 
 
+def letterbox_pair(image: np.ndarray, mask: np.ndarray, image_size: int):
+    h, w = image.shape[:2]
+    scale = min(image_size / max(w, 1), image_size / max(h, 1))
+    new_w = max(1, int(round(w * scale)))
+    new_h = max(1, int(round(h * scale)))
+    left = (image_size - new_w) // 2
+    top = (image_size - new_h) // 2
+
+    resized_image = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+    resized_mask = cv2.resize(mask, (new_w, new_h), interpolation=cv2.INTER_NEAREST)
+    boxed_image = np.zeros((image_size, image_size, 3), dtype=image.dtype)
+    boxed_mask = np.zeros((image_size, image_size), dtype=mask.dtype)
+    boxed_image[top : top + new_h, left : left + new_w] = resized_image
+    boxed_mask[top : top + new_h, left : left + new_w] = resized_mask
+    return boxed_image, boxed_mask
+
+
+def preprocess_pair(image: np.ndarray, mask: np.ndarray, image_size: int, preprocess: str):
+    if preprocess == "letterbox":
+        return letterbox_pair(image, mask, image_size)
+    return resize_pair(image, mask, image_size)
+
+
+def restore_mask_to_original(mask: np.ndarray, original_shape: tuple[int, int], preprocess: str) -> np.ndarray:
+    h, w = original_shape
+    if preprocess != "letterbox":
+        return cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
+    image_size = mask.shape[0]
+    scale = min(image_size / max(w, 1), image_size / max(h, 1))
+    new_w = max(1, int(round(w * scale)))
+    new_h = max(1, int(round(h * scale)))
+    left = (image_size - new_w) // 2
+    top = (image_size - new_h) // 2
+    cropped = mask[top : top + new_h, left : left + new_w]
+    return cv2.resize(cropped, (w, h), interpolation=cv2.INTER_NEAREST)
+
+
 def augment_pair(image: np.ndarray, mask: np.ndarray):
     if random.random() < 0.5:
         image = np.ascontiguousarray(image[:, ::-1])
@@ -97,10 +134,11 @@ def augment_pair(image: np.ndarray, mask: np.ndarray):
 
 
 class BeeForegroundDataset(Dataset):
-    def __init__(self, pairs: list[tuple[Path, Path]], image_size: int, train: bool):
+    def __init__(self, pairs: list[tuple[Path, Path]], image_size: int, train: bool, preprocess: str = "resize"):
         self.pairs = pairs
         self.image_size = image_size
         self.train = train
+        self.preprocess = preprocess
 
     def __len__(self) -> int:
         return len(self.pairs)
@@ -114,7 +152,7 @@ class BeeForegroundDataset(Dataset):
 
         image = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
         mask = (mask > 0).astype(np.uint8)
-        image, mask = resize_pair(image, mask, self.image_size)
+        image, mask = preprocess_pair(image, mask, self.image_size, self.preprocess)
         if self.train:
             image, mask = augment_pair(image, mask)
 
@@ -229,9 +267,9 @@ def overlay_mask(image_bgr: np.ndarray, mask: np.ndarray, color_bgr: tuple[int, 
 
 
 @torch.no_grad()
-def write_previews(model, pairs: list[tuple[Path, Path]], output_dir: Path, image_size: int, device, limit: int):
+def write_previews(model, pairs: list[tuple[Path, Path]], output_dir: Path, image_size: int, device, limit: int, preprocess: str):
     output_dir.mkdir(parents=True, exist_ok=True)
-    dataset = BeeForegroundDataset(pairs[:limit], image_size=image_size, train=False)
+    dataset = BeeForegroundDataset(pairs[:limit], image_size=image_size, train=False, preprocess=preprocess)
     model.eval()
     for image_tensor, target, image_path_text in dataset:
         image_path = Path(image_path_text)
@@ -242,7 +280,7 @@ def write_previews(model, pairs: list[tuple[Path, Path]], output_dir: Path, imag
         target_full = imread(image_path.with_name(image_path.name).parent.parent / "masks" / image_path.with_suffix(".png").name, cv2.IMREAD_GRAYSCALE)
         if image_bgr is None:
             continue
-        pred_full = cv2.resize(pred, (image_bgr.shape[1], image_bgr.shape[0]), interpolation=cv2.INTER_NEAREST)
+        pred_full = restore_mask_to_original(pred, image_bgr.shape[:2], preprocess)
         if target_full is None:
             target_full = cv2.resize(target[0].numpy().astype(np.uint8), (image_bgr.shape[1], image_bgr.shape[0]), interpolation=cv2.INTER_NEAREST)
         target_full = (target_full > 0).astype(np.uint8)
@@ -268,7 +306,11 @@ def main() -> int:
     parser.add_argument("--no-amp", action="store_true")
     parser.add_argument("--disable-cudnn", action="store_true")
     parser.add_argument("--resume-checkpoint")
+    parser.add_argument("--preprocess", default="resize", choices=["resize", "letterbox"])
+    parser.add_argument("--letterbox", action="store_true", help="Shortcut for --preprocess letterbox.")
     args = parser.parse_args()
+    if args.letterbox:
+        args.preprocess = "letterbox"
 
     set_seed(args.seed)
     dataset_dir = Path(args.dataset_dir).resolve()
@@ -298,14 +340,14 @@ def main() -> int:
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(args.epochs, 1))
 
     train_loader = DataLoader(
-        BeeForegroundDataset(train_pairs, args.image_size, train=True),
+        BeeForegroundDataset(train_pairs, args.image_size, train=True, preprocess=args.preprocess),
         batch_size=args.batch_size,
         shuffle=True,
         num_workers=args.num_workers,
         pin_memory=device.type == "cuda",
     )
     val_loader = DataLoader(
-        BeeForegroundDataset(val_pairs, args.image_size, train=False),
+        BeeForegroundDataset(val_pairs, args.image_size, train=False, preprocess=args.preprocess),
         batch_size=args.batch_size,
         shuffle=False,
         num_workers=args.num_workers,
@@ -360,6 +402,7 @@ def main() -> int:
                         "model_state": model.state_dict(),
                         "encoder": args.encoder,
                         "image_size": args.image_size,
+                        "preprocess": args.preprocess,
                         "classes": ["background", "bee"],
                         "imagenet_mean": IMAGENET_MEAN.tolist(),
                         "imagenet_std": IMAGENET_STD.tolist(),
@@ -385,6 +428,7 @@ def main() -> int:
             "model_state": model.state_dict(),
             "encoder": args.encoder,
             "image_size": args.image_size,
+            "preprocess": args.preprocess,
             "classes": ["background", "bee"],
             "imagenet_mean": IMAGENET_MEAN.tolist(),
             "imagenet_std": IMAGENET_STD.tolist(),
@@ -395,7 +439,8 @@ def main() -> int:
 
     checkpoint = torch.load(best_path, map_location=device)
     model.load_state_dict(checkpoint["model_state"])
-    write_previews(model, val_pairs, output_dir / "val_previews", args.image_size, device, args.preview_limit)
+    if args.preview_limit:
+        write_previews(model, val_pairs, output_dir / "val_previews", args.image_size, device, args.preview_limit, args.preprocess)
 
     summary = {
         "dataset_dir": str(dataset_dir),
@@ -405,6 +450,7 @@ def main() -> int:
         "device": str(device),
         "encoder": args.encoder,
         "image_size": args.image_size,
+        "preprocess": args.preprocess,
         "epochs": args.epochs,
         "batch_size": args.batch_size,
         "pos_weight": pos_weight.tolist(),

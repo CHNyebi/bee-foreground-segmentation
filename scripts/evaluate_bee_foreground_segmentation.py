@@ -54,12 +54,41 @@ def load_model(checkpoint_path: Path, device: torch.device):
     return model, image_size, mean, std, checkpoint
 
 
-def preprocess(image_bgr: np.ndarray, image_size: int, mean: np.ndarray, std: np.ndarray) -> np.ndarray:
+def letterbox_image(image: np.ndarray, image_size: int, fill_value: int = 0) -> tuple[np.ndarray, dict[str, int]]:
+    h, w = image.shape[:2]
+    scale = min(image_size / max(w, 1), image_size / max(h, 1))
+    new_w = max(1, int(round(w * scale)))
+    new_h = max(1, int(round(h * scale)))
+    left = (image_size - new_w) // 2
+    top = (image_size - new_h) // 2
+    resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+    boxed = np.full((image_size, image_size, image.shape[2]), fill_value, dtype=image.dtype)
+    boxed[top : top + new_h, left : left + new_w] = resized
+    return boxed, {"top": top, "left": left, "new_h": new_h, "new_w": new_w}
+
+
+def preprocess(image_bgr: np.ndarray, image_size: int, mean: np.ndarray, std: np.ndarray, preprocess_mode: str) -> tuple[np.ndarray, dict[str, int] | None]:
     rgb = cv2.cvtColor(image_bgr[:, :, :3], cv2.COLOR_BGR2RGB)
-    resized = cv2.resize(rgb, (image_size, image_size), interpolation=cv2.INTER_LINEAR)
-    arr = resized.astype(np.float32) / 255.0
+    meta = None
+    if preprocess_mode == "letterbox":
+        prepared, meta = letterbox_image(rgb, image_size)
+    else:
+        prepared = cv2.resize(rgb, (image_size, image_size), interpolation=cv2.INTER_LINEAR)
+    arr = prepared.astype(np.float32) / 255.0
     arr = (arr - mean.reshape(1, 1, 3)) / std.reshape(1, 1, 3)
-    return np.transpose(arr, (2, 0, 1)).astype(np.float32)
+    return np.transpose(arr, (2, 0, 1)).astype(np.float32), meta
+
+
+def restore_confidence(confidence: np.ndarray, original_shape: tuple[int, int], preprocess_mode: str, meta: dict[str, int] | None) -> np.ndarray:
+    h, w = original_shape
+    if preprocess_mode != "letterbox" or meta is None:
+        return cv2.resize(confidence, (w, h), interpolation=cv2.INTER_LINEAR)
+    top = meta["top"]
+    left = meta["left"]
+    new_h = meta["new_h"]
+    new_w = meta["new_w"]
+    cropped = confidence[top : top + new_h, left : left + new_w]
+    return cv2.resize(cropped, (w, h), interpolation=cv2.INTER_LINEAR)
 
 
 def list_pairs(images_dir: Path, masks_dir: Path) -> list[tuple[Path, Path]]:
@@ -211,7 +240,11 @@ def main() -> int:
     parser.add_argument("--min-area", type=int, default=8)
     parser.add_argument("--close-ratio", type=float, default=0.012)
     parser.add_argument("--overlay-limit", type=int, default=80)
+    parser.add_argument("--preprocess", choices=["resize", "letterbox"], help="Override checkpoint preprocessing.")
+    parser.add_argument("--letterbox", action="store_true", help="Shortcut for --preprocess letterbox.")
     args = parser.parse_args()
+    if args.letterbox:
+        args.preprocess = "letterbox"
 
     output_dir = Path(args.output_dir).resolve()
     overlay_dir = output_dir / "overlays"
@@ -223,12 +256,13 @@ def main() -> int:
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model, image_size, mean, std, checkpoint = load_model(Path(args.checkpoint), device)
+    preprocess_mode = args.preprocess or checkpoint.get("preprocess", "resize")
 
     rows: list[dict[str, str | int]] = []
     total_counts = {"tp": 0, "fp": 0, "fn": 0, "tn": 0}
     macro_metrics: list[dict[str, float]] = []
     batch_tensors: list[np.ndarray] = []
-    batch_meta: list[tuple[Path, Path, np.ndarray, np.ndarray]] = []
+    batch_meta: list[tuple[Path, Path, np.ndarray, np.ndarray, dict[str, int] | None]] = []
 
     def flush_batch() -> None:
         if not batch_tensors:
@@ -237,8 +271,8 @@ def main() -> int:
         with torch.no_grad():
             probs = torch.sigmoid(model(tensor))[:, 0].detach().cpu().numpy()
 
-        for prob_small, (image_path, mask_path, image_bgr, target) in zip(probs, batch_meta):
-            confidence = cv2.resize(prob_small, (image_bgr.shape[1], image_bgr.shape[0]), interpolation=cv2.INTER_LINEAR)
+        for prob_small, (image_path, mask_path, image_bgr, target, meta) in zip(probs, batch_meta):
+            confidence = restore_confidence(prob_small, image_bgr.shape[:2], preprocess_mode, meta)
             pred = confidence >= args.threshold
             if args.postprocess:
                 pred = clean_prediction(pred, min_area=args.min_area, close_ratio=args.close_ratio)
@@ -279,8 +313,9 @@ def main() -> int:
         if image_bgr is None or mask is None:
             continue
         target = mask > 0
-        batch_tensors.append(preprocess(image_bgr, image_size, mean, std))
-        batch_meta.append((image_path, mask_path, image_bgr, target))
+        tensor, meta = preprocess(image_bgr, image_size, mean, std, preprocess_mode)
+        batch_tensors.append(tensor)
+        batch_meta.append((image_path, mask_path, image_bgr, target, meta))
         if len(batch_tensors) >= args.batch_size:
             flush_batch()
     flush_batch()
@@ -318,6 +353,7 @@ def main() -> int:
         "checkpoint": str(Path(args.checkpoint).resolve()),
         "encoder": checkpoint.get("encoder", "resnet18"),
         "image_size": image_size,
+        "preprocess": preprocess_mode,
         "classes": checkpoint.get("classes", ["background", "bee"]),
         "device": str(device),
         "eval_set": eval_name,
