@@ -87,6 +87,71 @@ python scripts/train_bee_foreground_segmentation.py `
 
 `--disable-cudnn` 是因为这次 Windows 本机训练时遇到过 cuDNN 相关报错；在 Linux/CUDA 服务器上可以先不加，若报 cuDNN 错再加。
 
+## 评估模型
+
+在有人工 mask 的验证集上复测：
+
+```powershell
+python scripts/evaluate_bee_foreground_segmentation.py `
+  --checkpoint models\bee_foreground_unetpp_resnet18_v2\best_model.pt `
+  --dataset-dir data\bee_foreground_v2\dataset `
+  --split val `
+  --output-dir outputs\eval_val_v2 `
+  --batch-size 64
+```
+
+如果想评估完整推理流程里同样的后处理效果，加 `--postprocess`：
+
+```powershell
+python scripts/evaluate_bee_foreground_segmentation.py `
+  --checkpoint models\bee_foreground_unetpp_resnet18_v2\best_model.pt `
+  --dataset-dir data\bee_foreground_v2\dataset `
+  --split val `
+  --output-dir outputs\eval_val_v2_postprocess `
+  --postprocess
+```
+
+输出会包含 `summary.json`、`per_image_metrics.csv` 和 `overlays/`。overlay 颜色含义：绿色是真阳性，红色是假阳性，紫色是假阴性。
+
+## 多版本怎么选最好的
+
+建议固定三件事：同一份验证集、同一套阈值/后处理、同一套评估脚本。每训练一个版本，都把评估输出放到独立目录：
+
+```powershell
+python scripts/evaluate_bee_foreground_segmentation.py `
+  --checkpoint outputs\run_a\best_model.pt `
+  --dataset-dir data\bee_foreground_v2\dataset `
+  --split val `
+  --output-dir outputs\eval_run_a_val
+
+python scripts/evaluate_bee_foreground_segmentation.py `
+  --checkpoint outputs\run_b\best_model.pt `
+  --dataset-dir data\bee_foreground_v2\dataset `
+  --split val `
+  --output-dir outputs\eval_run_b_val
+```
+
+然后汇总排序：
+
+```powershell
+python tools/compare_eval_summaries.py `
+  outputs\eval_run_a_val\summary.json `
+  outputs\eval_run_b_val\summary.json `
+  --metric iou `
+  --scope pixel_micro_metrics `
+  --output outputs\model_comparison.csv
+```
+
+选择规则：
+
+- 主指标用 `pixel_micro_metrics.iou`，它最直接衡量整体分割重叠。
+- 同时看 `image_macro_metrics.iou`，避免模型只在大目标图上表现好，小图或复杂背景很差。
+- 蜜蜂分割更怕把身体漏掉，所以 IoU 接近时优先选 `recall` 更高、假阴性更少的版本。
+- 若两个版本指标差距小于 `0.005`，优先看 `overlays/` 里复杂背景和清晰大图的失败情况。
+- 最终要在原始大数据上再随机抽 100 张 overlay 做肉眼验收，确认没有系统性漏脚、漏翅、吃背景或多选其它蜜蜂。
+
+如果以后标注数据更多，最好额外留一份 `test_hard`，只在最后决策时跑，不参与训练和反复调参。
+
 ## 以后继续加数据，怎么避免重复
 
 `data/bee_foreground_v2/annotation_registry.csv` 是当前 264 张已标注样本的登记表，包含：
