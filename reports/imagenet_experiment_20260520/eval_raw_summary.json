@@ -1,0 +1,42 @@
+{
+  "checkpoint": "D:\\personal_resources\\CV_research\\boxmot\\bee_foreground_segmentation_release\\outputs\\imagenet_experiments_20260520\\unetpp_resnet18_256_imagenet\\best_model.pt",
+  "encoder": "resnet18",
+  "image_size": 256,
+  "preprocess": "resize",
+  "classes": [
+    "background",
+    "bee"
+  ],
+  "device": "cuda",
+  "eval_set": "val",
+  "samples": 53,
+  "threshold": 0.5,
+  "postprocess": false,
+  "pixel_micro_metrics": {
+    "iou": 0.8267531190461558,
+    "dice": 0.9051613055165847,
+    "precision": 0.8969202765683654,
+    "recall": 0.9135551782682513,
+    "accuracy": 0.9165282330540971
+  },
+  "image_macro_metrics": {
+    "iou": 0.8115408402171276,
+    "dice": 0.8937242703765236,
+    "precision": 0.8923220305669063,
+    "recall": 0.9024843161572319,
+    "accuracy": 0.9070784881731042
+  },
+  "counts": {
+    "tp": 134521,
+    "fp": 15460,
+    "fn": 12729,
+    "tn": 174997
+  },
+  "per_image_metrics_csv": "D:\\personal_resources\\CV_research\\boxmot\\bee_foreground_segmentation_release\\outputs\\imagenet_experiments_20260520\\eval_unetpp_resnet18_256_imagenet\\per_image_metrics.csv",
+  "overlay_dir": "D:\\personal_resources\\CV_research\\boxmot\\bee_foreground_segmentation_release\\outputs\\imagenet_experiments_20260520\\eval_unetpp_resnet18_256_imagenet\\overlays",
+  "overlay_legend": {
+    "green": "true positive bee",
+    "red": "false positive background predicted as bee",
+    "magenta": "false negative bee missed by prediction"
+  }
+}

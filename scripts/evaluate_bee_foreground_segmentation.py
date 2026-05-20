@@ -352,6 +352,7 @@ def main() -> int:
     summary = {
         "checkpoint": str(Path(args.checkpoint).resolve()),
         "encoder": checkpoint.get("encoder", "resnet18"),
+        "encoder_weights": checkpoint.get("encoder_weights"),
         "image_size": image_size,
         "preprocess": preprocess_mode,
         "classes": checkpoint.get("classes", ["background", "bee"]),

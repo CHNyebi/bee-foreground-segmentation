@@ -353,6 +353,7 @@ def main() -> int:
         "checkpoint": str(Path(args.checkpoint).resolve()),
         "device": str(device),
         "encoder": checkpoint.get("encoder", "resnet18"),
+        "encoder_weights": checkpoint.get("encoder_weights"),
         "image_size": image_size,
         "preprocess": preprocess_mode,
         "threshold": args.threshold,

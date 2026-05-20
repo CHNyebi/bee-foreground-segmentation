@@ -1,0 +1,26 @@
+{
+  "dataset_dir": "D:\\personal_resources\\CV_research\\boxmot\\bee_foreground_segmentation_release\\data\\bee_foreground_v2\\dataset",
+  "output_dir": "D:\\personal_resources\\CV_research\\boxmot\\bee_foreground_segmentation_release\\outputs\\imagenet_experiments_20260520\\unetpp_resnet18_256_imagenet",
+  "train_samples": 211,
+  "val_samples": 53,
+  "device": "cuda",
+  "encoder": "resnet18",
+  "encoder_weights": "imagenet",
+  "image_size": 256,
+  "preprocess": "resize",
+  "epochs": 80,
+  "batch_size": 4,
+  "pos_weight": [
+    1.342652440071106
+  ],
+  "best_epoch": 44,
+  "best_val_metrics": {
+    "iou": 0.8088760698571957,
+    "dice": 0.894341058888632,
+    "precision": 0.8925127332924554,
+    "recall": 0.8961768905654287,
+    "accuracy": 0.9063294608637972,
+    "loss": 0.44207693833225176
+  },
+  "elapsed_seconds": 667.31
+}

@@ -203,10 +203,10 @@ def metrics_from_counts(counts: dict[str, float]) -> dict[str, float]:
     }
 
 
-def make_model(encoder: str):
+def make_model(encoder: str, encoder_weights: str | None):
     return smp.UnetPlusPlus(
         encoder_name=encoder,
-        encoder_weights=None,
+        encoder_weights=encoder_weights,
         in_channels=3,
         classes=1,
     )
@@ -300,6 +300,11 @@ def main() -> int:
     parser.add_argument("--image-size", type=int, default=256)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--encoder", default="resnet18")
+    parser.add_argument(
+        "--encoder-weights",
+        default=None,
+        help="Encoder initialization, e.g. imagenet. Use none/null to train from scratch.",
+    )
     parser.add_argument("--seed", type=int, default=20260516)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--preview-limit", type=int, default=32)
@@ -311,6 +316,8 @@ def main() -> int:
     args = parser.parse_args()
     if args.letterbox:
         args.preprocess = "letterbox"
+    if isinstance(args.encoder_weights, str) and args.encoder_weights.lower() in {"", "none", "null"}:
+        args.encoder_weights = None
 
     set_seed(args.seed)
     dataset_dir = Path(args.dataset_dir).resolve()
@@ -328,7 +335,7 @@ def main() -> int:
     if args.disable_cudnn:
         torch.backends.cudnn.enabled = False
     use_amp = device.type == "cuda" and not args.no_amp
-    model = make_model(args.encoder).to(device)
+    model = make_model(args.encoder, args.encoder_weights).to(device)
     resume_epoch = 0
     if args.resume_checkpoint:
         checkpoint = torch.load(args.resume_checkpoint, map_location=device)
@@ -401,6 +408,7 @@ def main() -> int:
                     {
                         "model_state": model.state_dict(),
                         "encoder": args.encoder,
+                        "encoder_weights": args.encoder_weights,
                         "image_size": args.image_size,
                         "preprocess": args.preprocess,
                         "classes": ["background", "bee"],
@@ -427,6 +435,7 @@ def main() -> int:
         {
             "model_state": model.state_dict(),
             "encoder": args.encoder,
+            "encoder_weights": args.encoder_weights,
             "image_size": args.image_size,
             "preprocess": args.preprocess,
             "classes": ["background", "bee"],
@@ -449,6 +458,7 @@ def main() -> int:
         "val_samples": len(val_pairs),
         "device": str(device),
         "encoder": args.encoder,
+        "encoder_weights": args.encoder_weights,
         "image_size": args.image_size,
         "preprocess": args.preprocess,
         "epochs": args.epochs,
