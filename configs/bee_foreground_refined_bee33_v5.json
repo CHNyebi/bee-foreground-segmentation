@@ -1,0 +1,71 @@
+{
+  "version": "bee_foreground_refined_bee33_v5_20260521",
+  "task": "binary bee foreground segmentation",
+  "model": {
+    "architecture": "UnetPlusPlus",
+    "encoder": "resnet18",
+    "encoder_weights_lineage": "imagenet",
+    "in_channels": 3,
+    "classes": [
+      "background",
+      "bee"
+    ],
+    "image_size": 256,
+    "preprocess": "resize",
+    "checkpoint": "models/bee_foreground_unetpp_resnet18_imagenet_refined_bee33_v5/best_model.pt"
+  },
+  "dataset": {
+    "root": "data/bee_foreground_refined_20260521_plus_bee33/dataset",
+    "train_samples": 202,
+    "val_samples": 52,
+    "total_samples": 254,
+    "registry": "data/bee_foreground_refined_20260521_plus_bee33/annotation_registry.csv",
+    "composition": {
+      "refined_from_v2": {
+        "usable": 178,
+        "train": 141,
+        "val": 37,
+        "deleted_from_v2": 86
+      },
+      "added_bee24_33": {
+        "usable": 76,
+        "train": 61,
+        "val": 15
+      }
+    }
+  },
+  "training": {
+    "final_stage": "finetuned from an unpublished local v4 predecessor checkpoint",
+    "exact_training_chain_fully_published": false,
+    "batch_size": 4,
+    "finetune_epochs": 60,
+    "best_epoch": 141,
+    "learning_rate": 0.0001,
+    "optimizer": "AdamW",
+    "loss": "BCEWithLogitsLoss + DiceLoss",
+    "augmentation": "strong",
+    "windows_note": "The final run used CUDA with cuDNN disabled on the local Windows machine."
+  },
+  "recommended_inference": {
+    "threshold": 0.6,
+    "background_value": 0
+  },
+  "original_scale_eval_threshold_0_60": {
+    "combined_val": {
+      "samples": 52,
+      "iou": 0.8291575179715464,
+      "dice": 0.9066004538428651,
+      "precision": 0.9063619924379418,
+      "recall": 0.9068390407579197,
+      "accuracy": 0.9315357448501139
+    },
+    "bee24_33_val": {
+      "samples": 15,
+      "iou": 0.7906162464985994,
+      "dice": 0.8830660930778256,
+      "precision": 0.8827783931713038,
+      "recall": 0.8833539805698637,
+      "accuracy": 0.9232644681124086
+    }
+  }
+}

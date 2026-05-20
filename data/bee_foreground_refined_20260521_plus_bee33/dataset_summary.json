@@ -1,0 +1,26 @@
+{
+  "version": "bee_foreground_refined_20260521_plus_bee33",
+  "source_policy": "All human foreground-mask labels come from the ReID train_20260501 pool.",
+  "dataset_dir": "data/bee_foreground_refined_20260521_plus_bee33/dataset",
+  "train_samples": 202,
+  "val_samples": 52,
+  "total_samples": 254,
+  "composition": {
+    "refined_from_v2": {
+      "base_dataset": "data/bee_foreground_v2",
+      "usable_samples": 178,
+      "train_samples": 141,
+      "val_samples": 37,
+      "deleted_from_v2": 86,
+      "split_policy": "Preserve original v2 train/val assignment for retained samples."
+    },
+    "added_bee24_33": {
+      "prepared_dataset": "outputs/manual_datasets/bee33_clear76_split_20260521_2",
+      "usable_samples": 76,
+      "train_samples": 61,
+      "val_samples": 15,
+      "split_policy": "New BEE24-33 manual annotations split 80/20 into train/val."
+    }
+  },
+  "registry": "data/bee_foreground_refined_20260521_plus_bee33/annotation_registry.csv"
+}

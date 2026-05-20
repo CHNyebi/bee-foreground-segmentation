@@ -1,347 +1,311 @@
 # Bee Foreground Segmentation
 
-这个仓库保存当前蜜蜂前景分割模型、权重、人工标注数据集，以及后续继续加标注数据所需的去重和整理工具。
+这个仓库保存蜜蜂 ReID 裁剪图的前景分割模型、人工 mask 数据集和训练/评估脚本。模型用途很窄：给 ReID 图像生成 `bee` 前景 mask，用于去背景预处理；它不是 ReID 模型本身。
 
-它的定位很明确：**给 ReID 数据集里的蜜蜂裁剪图生成 bee foreground mask**。当前模型只用于预处理 ReID 图片，不是 ReID 模型本身。
+当前 GitHub 主分支只保留两版发布数据和权重：
 
-## 当前推荐版
+| Version | Dataset | Weight | Status |
+|---|---|---|---|
+| v2 baseline | `data/bee_foreground_v2` | `models/bee_foreground_unetpp_resnet18_v2/best_model.pt` | 旧服务器可继续使用 |
+| v5 refined + BEE24-33 | `data/bee_foreground_refined_20260521_plus_bee33` | `models/bee_foreground_unetpp_resnet18_imagenet_refined_bee33_v5/best_model.pt` | 当前推荐 |
 
-- 模型：`UnetPlusPlus`
-- Encoder：`resnet18`
-- Encoder 初始化：`imagenet`
-- 输入尺寸：`256x256`
-- 预处理：直接 `resize`
-- 类别：二分类，`bee` vs background
-- 当前推荐权重：`models/bee_foreground_unetpp_resnet18_imagenet_v3/best_model.pt`
-- 训练数据：264 张人工 mask 标注图
-- 训练/验证：211 / 53
-- 最佳 epoch：44
+说明：之前曾提交过的 `bee_foreground_unetpp_resnet18_imagenet_v3` 不再作为当前发布版本保留。Git 历史里仍能看到旧提交，但当前文件树只保留 v2 和 v5。
 
-上一版从头训练的 v2 权重仍保留在：
+## Quick Use
 
-```text
-models/bee_foreground_unetpp_resnet18_v2/best_model.pt
+用当前推荐的 v5 权重：
+
+```powershell
+python scripts\predict_bee_foreground_segmentation.py `
+  --input-dir D:\personal_resources\CV_research\AutoDL\train_20260501 `
+  --checkpoint models\bee_foreground_unetpp_resnet18_imagenet_refined_bee33_v5\best_model.pt `
+  --output-dir outputs\train_20260501_masked_v5 `
+  --threshold 0.60 `
+  --batch-size 64
 ```
 
-ImageNet 预训练初始化的 v3 在同一验证集原图尺度上明显更好：
+如果要和旧服务器保持一致，继续用 v2：
 
-```text
-v2 pixel IoU / Dice: 0.8008 / 0.8894
-v3 pixel IoU / Dice: 0.8268 / 0.9052
+```powershell
+python scripts\predict_bee_foreground_segmentation.py `
+  --input-dir <raw_reid_images> `
+  --checkpoint models\bee_foreground_unetpp_resnet18_v2\best_model.pt `
+  --output-dir <masked_output> `
+  --threshold 0.50 `
+  --batch-size 64
 ```
 
-当前这 264 张不是完整的 `train_20260501`，而是从 ReID 原始训练集 `train_20260501` 里抽出来并人工修正过 mask 的子集。
+输出目录包含：
+
+- `labels/`: 二值 mask，非零像素是 bee。
+- `masked/`: 背景置黑后的图像。
+- `overlays/`: 抽查用叠加图。
+- `prediction_report.csv`: 每张图的面积、置信度等统计。
+- `summary.json`: 本次推理配置摘要。
+
+## Model Structure
+
+两版都是二分类前景分割模型：
+
+- Architecture: `UnetPlusPlus`
+- Encoder: `resnet18`
+- Input: RGB image, resized to `256 x 256`
+- Output: one-channel foreground logit; sigmoid 后阈值化得到 bee mask
+- Normalization: ImageNet mean/std
+- Classes: `background`, `bee`
+
+## Dataset Versions
+
+### v2 baseline dataset
+
+路径：
 
 ```text
 data/bee_foreground_v2/
-  dataset/
-    train/images  # 211
-    train/masks
-    val/images    # 53
-    val/masks
+  dataset/train/images  # 211
+  dataset/train/masks   # 211
+  dataset/val/images    # 53
+  dataset/val/masks     # 53
   annotation_registry.csv
   train.csv
   val.csv
   usable_annotations.csv
+  dataset_summary.json
 ```
 
-## 安装
+构成：
 
-```powershell
-python -m pip install -r requirements.txt
+- 总数 264 张人工 mask。
+- 全部样本从 ReID 原始训练集 `train_20260501` 抽取。
+- split 为 211 train / 53 val。
+- 这是最早可用基线，里面保留了一些后来认为不够清楚、标注不够一致的样本。
+
+### v5 refined + BEE24-33 dataset
+
+路径：
+
+```text
+data/bee_foreground_refined_20260521_plus_bee33/
+  dataset/train/images  # 202
+  dataset/train/masks   # 202
+  dataset/val/images    # 52
+  dataset/val/masks     # 52
+  annotation_registry.csv
+  train.csv
+  val.csv
+  usable_annotations.csv
+  dataset_summary.json
 ```
 
-如果在 CUDA 服务器上复现，优先安装和服务器 CUDA 匹配的 PyTorch，再安装其它依赖。本机原始训练环境是 `torch 1.11.0+cu113` / `torchvision 0.12.0+cu113`。
+构成：
 
-## 直接使用当前权重
+- 总数 254 张人工 mask，202 train / 52 val。
+- 第一部分是从 v2 里重新精修后的样本：保留 178 张，删除 86 张不清楚或不适合继续用的样本；保留样本沿用原 v2 train/val split，得到 141 train / 37 val。
+- 第二部分是新增 BEE24-33 序列样本：从 `train_20260501` 里筛选、人工标注后得到 76 张，按 61 train / 15 val 加入。
+- 相比 v2，v5 数据集更小但标注更干净，并显著增加了 BEE24-33 复杂背景覆盖。
 
-对 ReID 的一个图片目录生成 mask、扣背景图和 overlay：
+新增数据时，用最新版 registry 去重：
 
 ```powershell
-python scripts/predict_bee_foreground_segmentation.py `
-  --input-dir D:\personal_resources\CV_research\AutoDL\train_20260501 `
-  --checkpoint models\bee_foreground_unetpp_resnet18_imagenet_v3\best_model.pt `
-  --output-dir outputs\train_20260501_masked_v3 `
-  --batch-size 64
+--registry data\bee_foreground_refined_20260521_plus_bee33\annotation_registry.csv
 ```
 
-输出：
+去重依据包括 sample id 和图像 SHA256，避免同一张图重复进入后续标注批次。
 
-- `labels/`：二值 mask，非零像素是 bee
-- `masked/`：背景置黑后的图
-- `overlays/`：抽查用叠加图
-- `prediction_report.csv`：每张图的面积、置信度等统计
-- `summary.json`：本次推理摘要
+## Training Configs
 
-如果要处理 ReID 三个 split，就分别跑：
+### v2 training config
+
+v2 是旧基线，训练配置来自 `models/bee_foreground_unetpp_resnet18_v2/summary.json` 和 `configs/bee_foreground_v2.json`：
+
+- Dataset: `data/bee_foreground_v2/dataset`
+- Architecture: `UnetPlusPlus`
+- Encoder: `resnet18`
+- Encoder weights: `none` / from scratch
+- Image size: `256`
+- Preprocess: direct resize
+- Augmentation: current script's `light` level is the closest match
+- Batch size: `4`
+- Optimizer: `AdamW`
+- Learning rate: `3e-4`
+- Loss: `BCEWithLogitsLoss + DiceLoss`
+- Requested epochs: `80`
+- Completed epochs: `58`
+- Best epoch: `41`
+- Device: CUDA, with cuDNN disabled on the local Windows training run
+
+Closest current-script command:
 
 ```powershell
-python scripts/predict_bee_foreground_segmentation.py --input-dir <raw_train> --checkpoint models\bee_foreground_unetpp_resnet18_imagenet_v3\best_model.pt --output-dir <masked_train>
-python scripts/predict_bee_foreground_segmentation.py --input-dir <raw_val>   --checkpoint models\bee_foreground_unetpp_resnet18_imagenet_v3\best_model.pt --output-dir <masked_val>
-python scripts/predict_bee_foreground_segmentation.py --input-dir <raw_eval>  --checkpoint models\bee_foreground_unetpp_resnet18_imagenet_v3\best_model.pt --output-dir <masked_eval>
-```
-
-注意：训练 mask 模型的人工标签只来自 ReID train；把冻结后的 mask 模型应用到 ReID val/eval 是可以的，这属于推理，不算泄漏。
-
-## 用现有 264 张数据重新训练
-
-```powershell
-python scripts/train_bee_foreground_segmentation.py `
+python scripts\train_bee_foreground_segmentation.py `
   --dataset-dir data\bee_foreground_v2\dataset `
-  --output-dir outputs\bee_foreground_unetpp_resnet18_imagenet_retrain `
+  --output-dir outputs\retrain_v2_baseline `
+  --encoder resnet18 `
+  --encoder-weights none `
+  --image-size 256 `
+  --batch-size 4 `
+  --epochs 58 `
+  --lr 3e-4 `
+  --aug-level light `
+  --disable-cudnn `
+  --num-workers 0
+```
+
+注意：当前训练脚本后续加过 `--aug-level`、`--resume-checkpoint`、`letterbox` 等能力。用当前脚本能复现 v2 的主要配置，但不保证 bit-for-bit 得到同一个权重。
+
+v2 指标：
+
+- Training-size best val IoU/Dice: `0.7765 / 0.8742`
+- Original-scale v2 val Pixel IoU/Dice at threshold 0.50: `0.8008 / 0.8894`
+
+### v5 training config
+
+v5 权重是后续迭代后的发布 artifact，不是从 v2 单次端到端训练得到的。实际历史链路是：
+
+1. 先在更干净的 refined 标注上训练/微调中间模型。
+2. 再加入 76 张 BEE24-33 新标注。
+3. 最后一阶段从本地中间 checkpoint 继续微调 60 epoch，使用 strong augmentation。
+
+最终 v5 发布权重：
+
+```text
+models/bee_foreground_unetpp_resnet18_imagenet_refined_bee33_v5/best_model.pt
+```
+
+最后一阶段训练配置：
+
+- Dataset: `data/bee_foreground_refined_20260521_plus_bee33/dataset`
+- Base checkpoint used locally: `models/bee_foreground_unetpp_resnet18_imagenet_refined_v4/best_model.pt`
+- Architecture: `UnetPlusPlus`
+- Encoder: `resnet18`
+- Encoder initialization lineage: ImageNet-pretrained encoder in the earlier chain
+- Image size: `256`
+- Preprocess: direct resize
+- Augmentation: `strong`
+- Batch size: `4`
+- Learning rate: `1e-4`
+- Finetune epochs: `60`
+- Best epoch in continued numbering: `141`
+- Device: CUDA, cuDNN disabled
+
+Historical final-stage command:
+
+```powershell
+python scripts\train_bee_foreground_segmentation.py `
+  --dataset-dir data\bee_foreground_refined_20260521_plus_bee33\dataset `
+  --output-dir outputs\refined_plus_bee33_20260521\finetune_v4_strongaug_lr1e4_e60 `
+  --encoder resnet18 `
+  --encoder-weights none `
+  --resume-checkpoint models\bee_foreground_unetpp_resnet18_imagenet_refined_v4\best_model.pt `
+  --image-size 256 `
+  --batch-size 4 `
+  --epochs 60 `
+  --lr 1e-4 `
+  --aug-level strong `
+  --disable-cudnn `
+  --num-workers 0
+```
+
+Because the intermediate v4 checkpoint is not published in the current two-version release, v5 is best treated as a fixed downloadable weight. You can train a comparable v5-style model from ImageNet initialization with the same dataset, but it will not exactly reproduce the published v5 checkpoint:
+
+```powershell
+python scripts\train_bee_foreground_segmentation.py `
+  --dataset-dir data\bee_foreground_refined_20260521_plus_bee33\dataset `
+  --output-dir outputs\train_v5_style_from_imagenet `
   --encoder resnet18 `
   --encoder-weights imagenet `
   --image-size 256 `
   --batch-size 4 `
   --epochs 80 `
-  --disable-cudnn
+  --lr 1e-4 `
+  --aug-level strong `
+  --disable-cudnn `
+  --num-workers 0
 ```
 
-Windows 本机训练时建议保留 `--disable-cudnn`，之前 cuDNN 在本机出现过不稳定。Linux 服务器上可以先不加，若报 cuDNN 错再加。
+## Evaluation
 
-如果想复现旧版从头训练，把 `--encoder-weights imagenet` 改成：
-
-```powershell
---encoder-weights none
-```
-
-对当前只有几百张 mask 的数据量，`resnet18 + imagenet` 比从头训练更合适。推理脚本不需要额外参数，训练好的 `best_model.pt` 已经保存完整权重。
-
-训练输出目录会包含：
-
-- `best_model.pt`
-- `last_model.pt`
-- `history.csv`
-- `summary.json`
-- `val_previews/`，如果 `--preview-limit` 大于 0
-
-## 评估模型
-
-在当前 53 张人工验证集上评估：
+Evaluate any checkpoint:
 
 ```powershell
-python scripts/evaluate_bee_foreground_segmentation.py `
-  --checkpoint models\bee_foreground_unetpp_resnet18_imagenet_v3\best_model.pt `
-  --dataset-dir data\bee_foreground_v2\dataset `
+python scripts\evaluate_bee_foreground_segmentation.py `
+  --checkpoint models\bee_foreground_unetpp_resnet18_imagenet_refined_bee33_v5\best_model.pt `
+  --dataset-dir data\bee_foreground_refined_20260521_plus_bee33\dataset `
   --split val `
-  --output-dir outputs\eval_val_imagenet_v3 `
-  --batch-size 64
+  --threshold 0.60 `
+  --output-dir outputs\eval_v5_combined_val
 ```
 
-输出：
+Overlay colors:
 
-- `summary.json`
-- `per_image_metrics.csv`
-- `overlays/`
+- Green: predicted bee and labeled bee.
+- Red: background predicted as bee.
+- Magenta: bee missed by prediction.
 
-overlay 颜色：
+Original-scale evaluation at threshold `0.60`:
 
-- 绿色：预测和人工标注都认为是 bee
-- 红色：模型误选了背景
-- 紫色：模型漏掉了 bee
+| Eval set | Samples | Model | Pixel IoU | Dice | Precision | Recall | Accuracy |
+|---|---:|---|---:|---:|---:|---:|---:|
+| refined old val | 37 | v4 local predecessor | 0.8319 | 0.9083 | 0.9100 | 0.9065 | 0.9317 |
+| refined old val | 37 | v5 | 0.8348 | 0.9100 | 0.9098 | 0.9102 | 0.9329 |
+| BEE24-33 val | 15 | v4 local predecessor | 0.6855 | 0.8134 | 0.7135 | 0.9458 | 0.8577 |
+| BEE24-33 val | 15 | v5 | 0.7906 | 0.8831 | 0.8828 | 0.8834 | 0.9233 |
+| combined v5 val | 52 | v5 | 0.8292 | 0.9066 | 0.9064 | 0.9068 | 0.9315 |
 
-多个模型可以用这个工具排序：
+The main v5 gain is on BEE24-33: it greatly reduces false positives on the difficult BEE24-33 backgrounds while keeping the older refined validation set roughly unchanged.
 
-```powershell
-python tools/compare_eval_summaries.py `
-  outputs\eval_run_a\summary.json `
-  outputs\eval_run_b\summary.json `
-  --metric iou `
-  --scope pixel_micro_metrics `
-  --output outputs\model_comparison.csv
-```
+## Adding More Labels
 
-## 继续新增人工标注数据
+Recommended policy:
 
-推荐原则：
+- Sample new foreground-mask labels only from ReID `train_20260501`.
+- Do not train the foreground model on ReID `val_20260501` or `eval`.
+- Keep each published dataset as an immutable version. Add new data by creating a new dataset directory.
+- Use the latest `annotation_registry.csv` to avoid duplicate images.
 
-- 只从 ReID 的 `train_20260501` 里继续抽图标注 mask。
-- 不要从 ReID 的 `val_20260501` 或 `eval` 里抽图来训练 mask 模型。
-- 不要覆盖 `data/bee_foreground_v2`，新增数据时创建 `data/bee_foreground_v3`、`v4` 这样的新版本。
-- 每次新增后更新 `annotation_registry.csv`，避免重复抽图。
-
-### 1. 从原始 train 池抽新候选
+Typical flow:
 
 ```powershell
-python tools/select_unlabeled_candidates.py `
+python tools\select_unlabeled_candidates.py `
   --source-root D:\personal_resources\CV_research\AutoDL\train_20260501 `
-  --registry data\bee_foreground_v2\annotation_registry.csv `
+  --registry data\bee_foreground_refined_20260521_plus_bee33\annotation_registry.csv `
   --sample-size 100 `
-  --seed 20260519 `
-  --output outputs\candidate_batches\fg_v3_candidates_100.csv
+  --seed 20260521 `
+  --output outputs\candidate_batches\fg_next_candidates_100.csv
+
+python tools\build_cvat_image_package.py `
+  --candidates-csv outputs\candidate_batches\fg_next_candidates_100.csv `
+  --output-dir outputs\cvat_batches\fg_next_batch001
 ```
 
-这个工具会按两层规则去重：
+In CVAT:
 
-- `sample_id`
-- 图片内容 SHA256
+- Create only one label: `bee`.
+- Upload `images.zip`.
+- Annotate the target bee mask only.
+- Export as `Segmentation mask 1.1`.
 
-也就是说，即使文件名变了，只要图片内容完全相同，也会被排除。
-
-### 2. 生成 CVAT 上传包
+Convert the CVAT export:
 
 ```powershell
-python tools/build_cvat_image_package.py `
-  --candidates-csv outputs\candidate_batches\fg_v3_candidates_100.csv `
-  --output-dir outputs\cvat_batches\fg_v3_batch001
-```
-
-输出：
-
-```text
-outputs/cvat_batches/fg_v3_batch001/
-  images/
-  images.zip
-  manifest.csv
-```
-
-在 CVAT 新建 task：
-
-- label 只建一个：`bee`
-- 上传 `images.zip`
-- 标注格式：只画目标蜜蜂主体 mask
-- 如果图里有其它背景蜜蜂、残缺蜜蜂，通常不要标
-
-标完后从 CVAT 导出：
-
-```text
-Segmentation mask 1.1
-```
-
-### 3. 把 CVAT 导出转换成训练数据
-
-假设 CVAT 导出文件是：
-
-```text
-C:\Users\dot\Downloads\job_xxx_annotations_segmentation mask 1.1.zip
-```
-
-运行：
-
-```powershell
-python scripts/prepare_bee_foreground_seg_dataset.py `
+python scripts\prepare_bee_foreground_seg_dataset.py `
   --annotations-zip "C:\Users\dot\Downloads\job_xxx_annotations_segmentation mask 1.1.zip" `
-  --subset-dir outputs\cvat_batches\fg_v3_batch001 `
-  --output-dir outputs\manual_datasets\fg_v3_batch001 `
+  --subset-dir outputs\cvat_batches\fg_next_batch001 `
+  --output-dir outputs\manual_datasets\fg_next_batch001 `
   --foreground-label bee `
   --val-fraction 0.20
 ```
 
-输出会包含：
-
-```text
-outputs/manual_datasets/fg_v3_batch001/
-  dataset/train/images
-  dataset/train/masks
-  dataset/val/images
-  dataset/val/masks
-  usable_annotations.csv
-  train.csv
-  val.csv
-  skipped_annotations.csv
-  summary.json
-```
-
-先看 `summary.json` 和 `skipped_annotations.csv`，确认没有大量漏转换。
-
-### 4. 合并成新的数据集版本
-
-不要直接改 `data/bee_foreground_v2`。创建新版本，例如 `v3`：
+Merge into a new version:
 
 ```powershell
-python tools/merge_foreground_datasets.py `
-  --base-root data\bee_foreground_v2 `
-  --add-root outputs\manual_datasets\fg_v3_batch001 `
-  --output-root data\bee_foreground_v3
+python tools\merge_foreground_datasets.py `
+  --base-root data\bee_foreground_refined_20260521_plus_bee33 `
+  --add-root outputs\manual_datasets\fg_next_batch001 `
+  --output-root data\bee_foreground_next
+
+python tools\build_annotation_registry.py `
+  --dataset-dir data\bee_foreground_next\dataset `
+  --metadata-csv data\bee_foreground_next\usable_annotations.csv `
+  --output data\bee_foreground_next\annotation_registry.csv
 ```
-
-然后为新版本生成 registry：
-
-```powershell
-python tools/build_annotation_registry.py `
-  --dataset-dir data\bee_foreground_v3\dataset `
-  --metadata-csv data\bee_foreground_v3\usable_annotations.csv `
-  --output data\bee_foreground_v3\annotation_registry.csv
-```
-
-以后再继续加数据时，把 `--registry` 指向最新版本：
-
-```powershell
---registry data\bee_foreground_v3\annotation_registry.csv
-```
-
-### 5. 用新版本重训
-
-```powershell
-python scripts/train_bee_foreground_segmentation.py `
-  --dataset-dir data\bee_foreground_v3\dataset `
-  --output-dir outputs\train_fg_v3_unetpp_resnet18_imagenet_256 `
-  --encoder resnet18 `
-  --encoder-weights imagenet `
-  --image-size 256 `
-  --batch-size 4 `
-  --epochs 80 `
-  --disable-cudnn
-```
-
-也可以从当前权重微调：
-
-```powershell
-python scripts/train_bee_foreground_segmentation.py `
-  --dataset-dir data\bee_foreground_v3\dataset `
-  --output-dir outputs\finetune_fg_v3_from_imagenet_v3 `
-  --encoder resnet18 `
-  --encoder-weights imagenet `
-  --image-size 256 `
-  --batch-size 4 `
-  --epochs 40 `
-  --disable-cudnn `
-  --resume-checkpoint models\bee_foreground_unetpp_resnet18_imagenet_v3\best_model.pt
-```
-
-### 6. 选择是否替换发布权重
-
-先用固定验证集评估新模型：
-
-```powershell
-python scripts/evaluate_bee_foreground_segmentation.py `
-  --checkpoint outputs\train_fg_v3_unetpp_resnet18_imagenet_256\best_model.pt `
-  --dataset-dir data\bee_foreground_v3\dataset `
-  --split val `
-  --output-dir outputs\eval_fg_v3
-```
-
-再和旧模型比较：
-
-```powershell
-python tools/compare_eval_summaries.py `
-  outputs\eval_val_imagenet_v3\summary.json `
-  outputs\eval_fg_v3\summary.json `
-  --metric iou `
-  --scope pixel_micro_metrics
-```
-
-如果 IoU 差距很小，优先看：
-
-- `image_macro_metrics.iou`
-- recall，是否漏蜜蜂身体、翅膀、腿
-- overlays 里的复杂背景图
-- 随机抽 100 张原始 ReID train/val/eval 的 overlay 肉眼检查
-
-## 数据泄漏规则
-
-可以：
-
-- 用 `train_20260501` 抽图标 mask
-- 用训练好的 mask 模型处理 ReID train/val/eval
-- 用 ReID val 比较不同 mask 版本对 ReID 的影响
-
-不可以：
-
-- 用 ReID val/eval 的图片人工标 mask 后训练 mask 模型
-- 看 ReID eval 结果后反复回头挑 mask 模型
-- 覆盖旧数据集版本导致结果不可追溯
-
-更完整的数据层级说明见：
-
-[docs/dataset_workflow.md](docs/dataset_workflow.md)

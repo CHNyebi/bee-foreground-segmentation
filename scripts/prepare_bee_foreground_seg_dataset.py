@@ -101,7 +101,7 @@ def find_mask_files(extract_dir: Path) -> list[Path]:
 
 def split_rows(rows: list[dict[str, str]], val_fraction: float) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
     rows = sorted(rows, key=lambda row: row["filename"])
-    if len(rows) <= 1:
+    if len(rows) <= 1 or val_fraction <= 0:
         return rows, []
     val_count = max(1, int(round(len(rows) * val_fraction)))
     val_every = max(2, len(rows) // val_count)

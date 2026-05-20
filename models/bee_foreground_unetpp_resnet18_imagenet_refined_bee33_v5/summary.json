@@ -1,0 +1,56 @@
+{
+  "version": "bee_foreground_refined_bee33_v5",
+  "dataset_dir": "data/bee_foreground_refined_20260521_plus_bee33/dataset",
+  "model_dir": "models/bee_foreground_unetpp_resnet18_imagenet_refined_bee33_v5",
+  "checkpoint": "models/bee_foreground_unetpp_resnet18_imagenet_refined_bee33_v5/best_model.pt",
+  "train_samples": 202,
+  "val_samples": 52,
+  "device": "cuda",
+  "encoder": "resnet18",
+  "encoder_weights_lineage": "imagenet",
+  "image_size": 256,
+  "preprocess": "resize",
+  "aug_level": "strong",
+  "epochs": 60,
+  "batch_size": 4,
+  "learning_rate": 0.0001,
+  "pos_weight": [
+    1.7403415441513062
+  ],
+  "base_checkpoint_used_locally": "models/bee_foreground_unetpp_resnet18_imagenet_refined_v4/best_model.pt",
+  "base_checkpoint_published": false,
+  "exact_training_chain_fully_published": false,
+  "reproducibility_note": "The final v5 artifact is published for direct use. Exact bit-for-bit retraining is not fully self-contained because the final run resumed from an unpublished local v4 predecessor checkpoint and uses stochastic augmentation/GPU training.",
+  "new_bee33_annotations": {
+    "usable": 76,
+    "train": 61,
+    "val": 15
+  },
+  "best_epoch": 141,
+  "best_val_metrics_training_scale": {
+    "iou": 0.819565404081088,
+    "dice": 0.9008364329667861,
+    "precision": 0.888991963515175,
+    "recall": 0.9130007835274231,
+    "accuracy": 0.9253991933969351,
+    "loss": 0.3879742118028494
+  },
+  "original_scale_eval_threshold_0_60": {
+    "combined_val": {
+      "samples": 52,
+      "iou": 0.8291575179715464,
+      "dice": 0.9066004538428651,
+      "precision": 0.9063619924379418,
+      "recall": 0.9068390407579197,
+      "accuracy": 0.9315357448501139
+    },
+    "bee24_33_val": {
+      "samples": 15,
+      "iou": 0.7906162464985994,
+      "dice": 0.8830660930778256,
+      "precision": 0.8827783931713038,
+      "recall": 0.8833539805698637,
+      "accuracy": 0.9232644681124086
+    }
+  }
+}

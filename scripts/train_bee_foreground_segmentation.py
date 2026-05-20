@@ -103,7 +103,96 @@ def restore_mask_to_original(mask: np.ndarray, original_shape: tuple[int, int], 
     return cv2.resize(cropped, (w, h), interpolation=cv2.INTER_NEAREST)
 
 
-def augment_pair(image: np.ndarray, mask: np.ndarray):
+def random_affine_pair(image: np.ndarray, mask: np.ndarray):
+    height, width = image.shape[:2]
+    angle = random.uniform(-22.0, 22.0)
+    scale = random.uniform(0.84, 1.14)
+    tx = random.uniform(-0.08, 0.08) * width
+    ty = random.uniform(-0.08, 0.08) * height
+    matrix = cv2.getRotationMatrix2D(((width - 1) / 2.0, (height - 1) / 2.0), angle, scale)
+    matrix[0, 2] += tx
+    matrix[1, 2] += ty
+    image = cv2.warpAffine(
+        image,
+        matrix,
+        (width, height),
+        flags=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_REFLECT_101,
+    )
+    mask = cv2.warpAffine(
+        mask,
+        matrix,
+        (width, height),
+        flags=cv2.INTER_NEAREST,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=0,
+    )
+    return image, mask
+
+
+def random_perspective_pair(image: np.ndarray, mask: np.ndarray):
+    height, width = image.shape[:2]
+    jitter = min(height, width) * 0.045
+    src = np.array(
+        [
+            [0.0, 0.0],
+            [width - 1.0, 0.0],
+            [width - 1.0, height - 1.0],
+            [0.0, height - 1.0],
+        ],
+        dtype=np.float32,
+    )
+    dst = src + np.random.uniform(-jitter, jitter, src.shape).astype(np.float32)
+    matrix = cv2.getPerspectiveTransform(src, dst)
+    image = cv2.warpPerspective(
+        image,
+        matrix,
+        (width, height),
+        flags=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_REFLECT_101,
+    )
+    mask = cv2.warpPerspective(
+        mask,
+        matrix,
+        (width, height),
+        flags=cv2.INTER_NEAREST,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=0,
+    )
+    return image, mask
+
+
+def random_gamma(image: np.ndarray):
+    gamma = random.uniform(0.72, 1.35)
+    table = np.clip(((np.arange(256, dtype=np.float32) / 255.0) ** gamma) * 255.0, 0, 255).astype(np.uint8)
+    return cv2.LUT(image, table)
+
+
+def random_local_contrast(image: np.ndarray):
+    lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
+    clip_limit = random.uniform(1.2, 2.8)
+    tile_grid = random.choice([(4, 4), (8, 8)])
+    clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=tile_grid)
+    lab[:, :, 0] = clahe.apply(lab[:, :, 0])
+    return cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
+
+
+def random_shadow(image: np.ndarray):
+    height, width = image.shape[:2]
+    x0 = random.uniform(-width, width)
+    y0 = random.uniform(-height, height)
+    x1 = random.uniform(0, width * 2.0)
+    y1 = random.uniform(0, height * 2.0)
+    yy, xx = np.mgrid[0:height, 0:width].astype(np.float32)
+    dist = np.abs((y1 - y0) * xx - (x1 - x0) * yy + x1 * y0 - y1 * x0)
+    dist /= max(1.0, np.hypot(y1 - y0, x1 - x0))
+    band = np.clip(1.0 - dist / max(1.0, min(height, width) * random.uniform(0.35, 0.85)), 0.0, 1.0)
+    strength = random.uniform(0.10, 0.28)
+    factor = 1.0 - band[:, :, None] * strength
+    return np.clip(image.astype(np.float32) * factor, 0, 255).astype(np.uint8)
+
+
+def augment_pair(image: np.ndarray, mask: np.ndarray, aug_level: str = "light"):
     if random.random() < 0.5:
         image = np.ascontiguousarray(image[:, ::-1])
         mask = np.ascontiguousarray(mask[:, ::-1])
@@ -114,10 +203,20 @@ def augment_pair(image: np.ndarray, mask: np.ndarray):
         k = random.randint(1, 3)
         image = np.ascontiguousarray(np.rot90(image, k))
         mask = np.ascontiguousarray(np.rot90(mask, k))
+    if aug_level == "strong" and random.random() < 0.65:
+        image, mask = random_affine_pair(image, mask)
+    if aug_level == "strong" and random.random() < 0.22:
+        image, mask = random_perspective_pair(image, mask)
     if random.random() < 0.7:
         alpha = random.uniform(0.78, 1.22)
         beta = random.uniform(-18.0, 18.0)
         image = np.clip(image.astype(np.float32) * alpha + beta, 0, 255).astype(np.uint8)
+    if aug_level == "strong" and random.random() < 0.35:
+        image = random_gamma(image)
+    if aug_level == "strong" and random.random() < 0.25:
+        image = random_local_contrast(image)
+    if aug_level == "strong" and random.random() < 0.25:
+        image = random_shadow(image)
     if random.random() < 0.45:
         hsv = cv2.cvtColor(image, cv2.COLOR_RGB2HSV).astype(np.float32)
         hsv[:, :, 1] *= random.uniform(0.78, 1.25)
@@ -134,11 +233,19 @@ def augment_pair(image: np.ndarray, mask: np.ndarray):
 
 
 class BeeForegroundDataset(Dataset):
-    def __init__(self, pairs: list[tuple[Path, Path]], image_size: int, train: bool, preprocess: str = "resize"):
+    def __init__(
+        self,
+        pairs: list[tuple[Path, Path]],
+        image_size: int,
+        train: bool,
+        preprocess: str = "resize",
+        aug_level: str = "light",
+    ):
         self.pairs = pairs
         self.image_size = image_size
         self.train = train
         self.preprocess = preprocess
+        self.aug_level = aug_level
 
     def __len__(self) -> int:
         return len(self.pairs)
@@ -154,7 +261,7 @@ class BeeForegroundDataset(Dataset):
         mask = (mask > 0).astype(np.uint8)
         image, mask = preprocess_pair(image, mask, self.image_size, self.preprocess)
         if self.train:
-            image, mask = augment_pair(image, mask)
+            image, mask = augment_pair(image, mask, self.aug_level)
 
         arr = image.astype(np.float32) / 255.0
         arr = (arr - IMAGENET_MEAN.reshape(1, 1, 3)) / IMAGENET_STD.reshape(1, 1, 3)
@@ -312,6 +419,7 @@ def main() -> int:
     parser.add_argument("--disable-cudnn", action="store_true")
     parser.add_argument("--resume-checkpoint")
     parser.add_argument("--preprocess", default="resize", choices=["resize", "letterbox"])
+    parser.add_argument("--aug-level", default="light", choices=["light", "strong"])
     parser.add_argument("--letterbox", action="store_true", help="Shortcut for --preprocess letterbox.")
     args = parser.parse_args()
     if args.letterbox:
@@ -347,7 +455,7 @@ def main() -> int:
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(args.epochs, 1))
 
     train_loader = DataLoader(
-        BeeForegroundDataset(train_pairs, args.image_size, train=True, preprocess=args.preprocess),
+        BeeForegroundDataset(train_pairs, args.image_size, train=True, preprocess=args.preprocess, aug_level=args.aug_level),
         batch_size=args.batch_size,
         shuffle=True,
         num_workers=args.num_workers,
@@ -411,6 +519,7 @@ def main() -> int:
                         "encoder_weights": args.encoder_weights,
                         "image_size": args.image_size,
                         "preprocess": args.preprocess,
+                        "aug_level": args.aug_level,
                         "classes": ["background", "bee"],
                         "imagenet_mean": IMAGENET_MEAN.tolist(),
                         "imagenet_std": IMAGENET_STD.tolist(),
@@ -438,6 +547,7 @@ def main() -> int:
             "encoder_weights": args.encoder_weights,
             "image_size": args.image_size,
             "preprocess": args.preprocess,
+            "aug_level": args.aug_level,
             "classes": ["background", "bee"],
             "imagenet_mean": IMAGENET_MEAN.tolist(),
             "imagenet_std": IMAGENET_STD.tolist(),
@@ -461,6 +571,7 @@ def main() -> int:
         "encoder_weights": args.encoder_weights,
         "image_size": args.image_size,
         "preprocess": args.preprocess,
+        "aug_level": args.aug_level,
         "epochs": args.epochs,
         "batch_size": args.batch_size,
         "pos_weight": pos_weight.tolist(),
